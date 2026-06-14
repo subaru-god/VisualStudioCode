@@ -1,2 +1,2 @@
-これはVisualStudioCodeで編集したファイルなどを保存するリポジトリせ
+これはVisualStudioCodeで編集したファイルなどを保存するリポジトリ
 です
