@@ -1,0 +1,834 @@
+#include <windows.h>
+#include <commctrl.h> 
+#include <vector>
+#include <cstdlib>
+#include <ctime>
+#include <fstream>
+#include <string>
+#include <stdio.h>
+#include <math.h>
+#include <cstring>
+
+using namespace std;
+
+// 【ファイルを使わない対策】
+// コモンコントロール初期化関数の型定義と関数ポインタ
+typedef BOOL (WINAPI *INITCOMMONCONTROLSEXPROC)(const INITCOMMONCONTROLSEX*);
+
+const int BOARD_SIZE = 8;
+const int CELL_SIZE = 50;
+const int EMPTY = 0;
+const int BLACK = 1;
+const int WHITE = -1;
+
+const int dr[] = {-1, -1, -1,  0, 0,  1, 1, 1};
+const int dc[] = {-1,  0,  1, -1, 1, -1, 0, 1};
+
+double g_weightTable[BOARD_SIZE][BOARD_SIZE];
+
+struct Move {
+    int r, c;
+};
+
+class Othello {
+public:
+    int board[BOARD_SIZE][BOARD_SIZE];
+    int turn;
+
+    Othello();
+    void reset();
+    bool isValidMove(int r, int c, bool flip = false);
+    vector<Move> getValidMoves();
+};
+
+Othello::Othello() { 
+    reset(); 
+}
+
+void Othello::reset() {
+    for(int i=0; i<BOARD_SIZE; i++) {
+        for(int j=0; j<BOARD_SIZE; j++) board[i][j] = EMPTY;
+    }
+    board[3][3] = WHITE; board[3][4] = BLACK;
+    board[4][3] = BLACK; board[4][4] = WHITE;
+    turn = BLACK;
+}
+
+bool Othello::isValidMove(int r, int c, bool flip) {
+    if (r < 0 || r >= BOARD_SIZE || c < 0 || c >= BOARD_SIZE) return false;
+    if (board[r][c] != EMPTY) return false;
+    bool valid = false;
+
+    for (int i = 0; i < 8; i++) {
+        int nr = r + dr[i];
+        int nc = c + dc[i];
+        int count = 0;
+
+        while (nr >= 0 && nr < BOARD_SIZE && nc >= 0 && nc < BOARD_SIZE && board[nr][nc] == -turn) {
+            nr += dr[i];
+            nc += dc[i];
+            count++;
+        }
+
+        if (count > 0 && nr >= 0 && nr < BOARD_SIZE && nc >= 0 && nc < BOARD_SIZE && board[nr][nc] == turn) {
+            valid = true;
+            if (flip) {
+                int fr = r + dr[i];
+                int fc = c + dc[i];
+                while (fr != nr || fc != nc) {
+                    board[fr][fc] = turn;
+                    fr += dr[i];
+                    fc += dc[i];
+                }
+            }
+        }
+    }
+    if (valid && flip) {
+        board[r][c] = turn;
+    }
+    return valid;
+}
+
+vector<Move> Othello::getValidMoves() {
+    vector<Move> moves;
+    for (int i = 0; i < BOARD_SIZE; i++) {
+        for (int j = 0; j < BOARD_SIZE; j++) {
+            if (isValidMove(i, j)) {
+                Move m; m.r = i; m.c = j;
+                moves.push_back(m);
+            }
+        }
+    }
+    return moves;
+}
+
+// グローバル変数
+Othello g_game;
+int g_mode = 1; 
+int g_passCount = 0;
+bool g_gameOver = false;
+int g_totalGames = 10;    
+int g_currentGame = 0;
+int g_totalDataCount = 0; 
+bool g_isPassing = false; 
+
+const char* const DATA_FILE_PATH = "othello_dataset.dat";
+int g_aiLevel = 5; 
+
+char g_inputBuffer[16] = "10";
+bool g_inputDone = false;
+
+const unsigned char MOVE_PASS = 0xFF;
+
+const RECT BTN_RECT_PVP = { 430, 180, 520, 210 };
+const RECT BTN_RECT_PVE = { 530, 180, 620, 210 };
+const RECT BTN_RECT_EVE = { 630, 180, 720, 210 };
+
+bool g_learningCancelled = false;
+streampos g_gameStartPosition = 0; 
+
+// --- 前方宣言 ---
+void convertOldLogsToBinary();
+void trainAIFromDataset();
+void saveStepToDataset(Move nextMove, bool isPass);
+void saveGameEndMarker();
+void runFastLearning(HWND hwnd);
+void triggerAIMove(HWND hwnd);
+void truncateUnfinishedGame();
+
+Move selectAIMoveBasedOnLevel(const vector<Move>& moves) {
+    int rate = (g_aiLevel - 1) * 11;
+    if ((rand() % 100) < rate) {
+        int bestIdx = 0;
+        double maxWeight = -999999.0;
+        for (size_t i = 0; i < moves.size(); i++) {
+            int r = moves[i].r;
+            int c = moves[i].c;
+            double w = g_weightTable[r][c];
+
+            if ((r == 1 && c == 1 && g_game.board[0][0] == EMPTY) ||
+                (r == 1 && c == 6 && g_game.board[0][7] == EMPTY) ||
+                (r == 6 && c == 1 && g_game.board[7][0] == EMPTY) ||
+                (r == 6 && c == 6 && g_game.board[7][7] == EMPTY)) {
+                w -= 45.0;
+            }
+            if (r == 0 || r == 7 || c == 0 || c == 7) {
+                w += 15.0; 
+            }
+
+            if (w > maxWeight) {
+                maxWeight = w;
+                bestIdx = i;
+            }
+        }
+        return moves[bestIdx];
+    } else {
+        return moves[rand() % moves.size()];
+    }
+}
+
+void convertOldLogsToBinary() {
+    WIN32_FIND_DATA findData;
+    HANDLE hFind = FindFirstFile("log\\*.log", &findData);
+    
+    if (hFind != INVALID_HANDLE_VALUE) {
+        bool hasConvertedAny = false;
+        do {
+            string fullPath = "log\\" + string(findData.cFileName);
+            ifstream logFile(fullPath.c_str());
+            if (logFile) {
+                string line;
+                hasConvertedAny = true;
+                while (getline(logFile, line)) {
+                    if (line.empty()) continue;
+                    
+                    int vals[67]; 
+                    int idx = 0;
+                    string token;
+                    string tempLine = line;
+                    
+                    // 【W8004対策】ループ条件を整理し、未使用のpos代入警告を完全に排除
+                    while (!tempLine.empty() && idx < 67) {
+                        size_t nextPos = tempLine.find(',');
+                        if (nextPos == string::npos) {
+                            vals[idx++] = atoi(tempLine.c_str());
+                            break;
+                        }
+                        token = tempLine.substr(0, nextPos);
+                        vals[idx++] = atoi(token.c_str());
+                        tempLine.erase(0, nextPos + 1);
+                    }
+                    
+                    if(idx >= 66) {
+                        int r = vals[64];
+                        int c = vals[65];
+                        Move m; m.r = r; m.c = c;
+                        saveStepToDataset(m, false);
+                    }
+                }
+                logFile.close();
+                string bakPath = fullPath + ".bak";
+                MoveFile(fullPath.c_str(), bakPath.c_str());
+            }
+        } while (FindNextFile(hFind, &findData));
+        FindClose(hFind);
+        if (hasConvertedAny) {
+            saveGameEndMarker();
+        }
+    }
+}
+
+void trainAIFromDataset() {
+    convertOldLogsToBinary();
+
+    for(int i=0; i<BOARD_SIZE; i++) {
+        for(int j=0; j<BOARD_SIZE; j++) g_weightTable[i][j] = 0.0;
+    }
+    
+    g_totalDataCount = 0;
+    ifstream dbFile(DATA_FILE_PATH, ios::binary);
+    if (!dbFile) return;
+
+    dbFile.seekg(0, ios::end);
+    streampos fileSize = dbFile.tellg();
+    dbFile.seekg(0, ios::beg);
+
+    if (fileSize <= 0) {
+        dbFile.close();
+        return;
+    }
+
+    vector<unsigned char> data((size_t)fileSize);
+    dbFile.read((char*)&data[0], fileSize);
+    dbFile.close();
+
+    Othello simGame;
+    size_t idx = 0;
+
+    while (idx < data.size()) {
+        simGame.reset();
+
+        while (idx < data.size()) {
+            unsigned char code = data[idx++];
+            
+            if (code == 0xFE) { 
+                break; 
+            }
+
+            if (code == MOVE_PASS) {
+                simGame.turn = -simGame.turn;
+                continue;
+            }
+
+            int r = code >> 4;   
+            int c = code & 0x0F; 
+
+            if (r >= 0 && r < BOARD_SIZE && c >= 0 && c < BOARD_SIZE) {
+                g_weightTable[r][c] += 1.0;
+                g_totalDataCount++;
+
+                simGame.isValidMove(r, c, true);
+                simGame.turn = -simGame.turn;
+            }
+        }
+    }
+
+    g_weightTable[0][0] += 50; g_weightTable[0][7] += 50;
+    g_weightTable[7][0] += 50; g_weightTable[7][7] += 50;
+}
+
+void saveStepToDataset(Move nextMove, bool isPass) {
+    ofstream dbFile(DATA_FILE_PATH, ios::app | ios::binary);
+    if (!dbFile) return;
+
+    if (isPass) {
+        unsigned char code = MOVE_PASS;
+        dbFile.write((char*)&code, 1);
+    } else {
+        unsigned char code = (nextMove.r << 4) | (nextMove.c & 0x0F);
+        dbFile.write((char*)&code, 1);
+        g_totalDataCount++;
+    }
+    dbFile.close();
+}
+
+void saveGameEndMarker() {
+    ofstream dbFile(DATA_FILE_PATH, ios::app | ios::binary);
+    if (!dbFile) return;
+    unsigned char marker = 0xFE; 
+    dbFile.write((char*)&marker, 1);
+    dbFile.close();
+}
+
+void recordCurrentFilePosition() {
+    ifstream dbFile(DATA_FILE_PATH, ios::binary | ios::ate);
+    if (!dbFile) {
+        g_gameStartPosition = 0;
+    } else {
+        g_gameStartPosition = dbFile.tellg();
+        dbFile.close();
+    }
+}
+
+void truncateUnfinishedGame() {
+    if (g_gameStartPosition <= 0) return;
+
+    HANDLE hFile = CreateFile(DATA_FILE_PATH, GENERIC_WRITE, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (hFile != INVALID_HANDLE_VALUE) {
+        LONG lowPart = (LONG)(g_gameStartPosition & 0xFFFFFFFF);
+        LONG highPart = 0; 
+        SetFilePointer(hFile, lowPart, &highPart, FILE_BEGIN);
+        SetEndOfFile(hFile);
+        CloseHandle(hFile);
+    }
+}
+
+bool processSingleMove() {
+    if (g_gameOver) return false;
+
+    vector<Move> moves = g_game.getValidMoves();
+    if (moves.empty()) {
+        g_passCount++;
+        Move dummyMove; dummyMove.r = 0; dummyMove.c = 0;
+        saveStepToDataset(dummyMove, true); 
+        if (g_passCount >= 2) {
+            g_gameOver = true;
+            g_isPassing = false;
+            saveGameEndMarker(); 
+            return false;
+        }
+        g_isPassing = true;
+        g_game.turn = -g_game.turn;
+        return true; 
+    }
+
+    g_passCount = 0;
+    g_isPassing = false;
+
+    Move aiMove = selectAIMoveBasedOnLevel(moves);
+    saveStepToDataset(aiMove, false); 
+    g_game.isValidMove(aiMove.r, aiMove.c, true);
+    g_game.turn = -g_game.turn;
+
+    return true;
+}
+
+LRESULT CALLBACK ProgressWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    static HWND hProgress, hStatus;
+    switch (msg) {
+        case WM_CREATE:
+            hStatus = CreateWindow("STATIC", "自動学習中...", WS_CHILD | WS_VISIBLE, 20, 15, 300, 20, hwnd, NULL, NULL, NULL);
+            hProgress = CreateWindow(PROGRESS_CLASS, NULL, WS_CHILD | WS_VISIBLE | PBS_SMOOTH, 20, 40, 300, 25, hwnd, NULL, NULL, NULL);
+            CreateWindow("BUTTON", "キャンセル", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 130, 80, 100, 30, hwnd, (HMENU)IDCANCEL, NULL, NULL);
+            
+            SendMessage(hProgress, PBM_SETRANGE, 0, MAKELPARAM(0, g_totalGames));
+            SendMessage(hProgress, PBM_SETSTEP, 1, 0);
+            break;
+        case WM_USER + 100: { 
+            int cur = (int)wp;
+            char buf[128];
+            sprintf(buf, "高速自動学習中... ( %d / %d 試合完了 )", cur, g_totalGames);
+            SetWindowText(hStatus, buf);
+            SendMessage(hProgress, PBM_SETPOS, cur, 0);
+            break;
+        }
+        case WM_COMMAND:
+            if (LOWORD(wp) == IDCANCEL) {
+                g_learningCancelled = true;
+                DestroyWindow(hwnd);
+            }
+            break;
+        default:
+            return DefWindowProc(hwnd, msg, wp, lp);
+    }
+    return 0;
+}
+
+void runFastLearning(HWND hwnd) {
+    int oldMode = g_mode;
+    g_mode = 2; 
+    g_currentGame = 0;
+    g_learningCancelled = false;
+
+    HINSTANCE hInst = GetModuleHandle(NULL);
+    WNDCLASSEX wcl = {0};
+    wcl.cbSize = sizeof(WNDCLASSEX);
+    wcl.lpfnWndProc = ProgressWndProc;
+    wcl.hInstance = hInst;
+    wcl.hCursor = LoadCursor(NULL, IDC_ARROW);
+    wcl.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
+    wcl.lpszClassName = "ProgressBoxWindow";
+    RegisterClassEx(&wcl);
+
+    HWND hwndProg = CreateWindowEx(WS_EX_DLGMODALFRAME, "ProgressBoxWindow", "学習プログレス", 
+                                   WS_POPUPWINDOW | WS_CAPTION, CW_USEDEFAULT, CW_USEDEFAULT, 350, 160, 
+                                   hwnd, NULL, hInst, NULL);
+    
+    EnableWindow(hwnd, FALSE);
+    
+    RECT rcOwner, rcDlg;
+    GetWindowRect(hwnd, &rcOwner);
+    GetWindowRect(hwndProg, &rcDlg);
+    int x = rcOwner.left + ((rcOwner.right - rcOwner.left) - (rcDlg.right - rcDlg.left)) / 2;
+    int y = rcOwner.top + ((rcOwner.bottom - rcOwner.top) - (rcDlg.bottom - rcDlg.top)) / 2;
+    SetWindowPos(hwndProg, NULL, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+    ShowWindow(hwndProg, SW_SHOW);
+    UpdateWindow(hwndProg);
+
+    while (g_currentGame < g_totalGames && !g_learningCancelled) {
+        recordCurrentFilePosition();
+
+        g_game.reset();
+        g_gameOver = false;
+        g_passCount = 0;
+        g_isPassing = false;
+
+        while (!g_gameOver && !g_learningCancelled) {
+            processSingleMove();
+
+            MSG msg;
+            while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+                TranslateMessage(&msg);
+                DispatchMessage(&msg);
+            }
+        }
+
+        if (!g_learningCancelled) {
+            g_currentGame++;
+            SendMessage(hwndProg, WM_USER + 100, g_currentGame, 0);
+        }
+    }
+
+    EnableWindow(hwnd, TRUE);
+
+    if (g_learningCancelled) {
+        truncateUnfinishedGame();
+        DestroyWindow(hwndProg);
+        trainAIFromDataset(); 
+        
+        g_mode = oldMode;
+        g_game.reset();
+        g_gameOver = false;
+        g_passCount = 0;
+        g_isPassing = false;
+        
+        InvalidateRect(hwnd, NULL, TRUE);
+        MessageBox(hwnd, "学習が途中で停止されました。\n中断した試合データは安全に削除されました。", "中断", MB_OK | MB_ICONEXCLAMATION);
+        return;
+    }
+
+    DestroyWindow(hwndProg);
+    trainAIFromDataset();
+    g_mode = oldMode;
+    g_game.reset();
+    g_gameOver = false;
+    g_passCount = 0;
+    g_isPassing = false;
+    
+    InvalidateRect(hwnd, NULL, TRUE);
+    MessageBox(hwnd, "すべての自動高速学習対戦が完了しました！\n学習結果をAIに反映しました。", "完了", MB_OK | MB_ICONINFORMATION);
+}
+
+void triggerAIMove(HWND hwnd) {
+    if (g_gameOver) return;
+
+    if (g_mode == 2 || (g_mode == 1 && g_game.turn == WHITE)) {
+        processSingleMove();
+        InvalidateRect(hwnd, NULL, FALSE);
+        UpdateWindow(hwnd);
+
+        if (!g_gameOver) {
+            vector<Move> nextMoves = g_game.getValidMoves();
+            if (nextMoves.empty()) {
+                g_passCount++;
+                Move dummyMove; dummyMove.r = 0; dummyMove.c = 0;
+                saveStepToDataset(dummyMove, true);
+                if (g_passCount >= 2) {
+                    g_gameOver = true;
+                    saveGameEndMarker();
+                } else {
+                    g_isPassing = true;
+                    g_game.turn = -g_game.turn;
+                }
+                InvalidateRect(hwnd, NULL, FALSE);
+                UpdateWindow(hwnd);
+            }
+        }
+    }
+}
+
+int ShowLevelSelectBox(HWND hwndParent) {
+    int res = MessageBox(hwndParent, "AIの初期レベルを最高（LV 10）にしますか？\n\n【はい】: レベル 10 (最強モード)\n【いいえ】: レベル 5 (バランスモード)\n【キャンセル】: レベル 1 (ランダム)", "AIレベルの初期設定", MB_YESNOCANCEL | MB_ICONQUESTION);
+    if (res == IDYES) return 10;
+    if (res == IDNO) return 5;
+    return 1;
+}
+
+LRESULT CALLBACK InputWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    static HWND hEdit, hBtn;
+    switch (msg) {
+        case WM_CREATE:
+            CreateWindow("STATIC", "自動学習を行う試合数を入力してください（半角数字）:", 
+                         WS_CHILD | WS_VISIBLE, 15, 15, 320, 20, hwnd, NULL, NULL, NULL);
+            hEdit = CreateWindow("EDIT", g_inputBuffer, 
+                                 WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER, 15, 45, 120, 24, hwnd, NULL, NULL, NULL);
+            hBtn = CreateWindow("BUTTON", "確定", 
+                                WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON, 150, 44, 80, 26, hwnd, (HMENU)IDOK, NULL, NULL);
+            SetFocus(hEdit);
+            break;
+        case WM_COMMAND:
+            if (LOWORD(wp) == IDOK) {
+                GetWindowText(hEdit, g_inputBuffer, sizeof(g_inputBuffer));
+                g_inputDone = true;
+                DestroyWindow(hwnd);
+            }
+            break;
+        case WM_CLOSE:
+            g_inputDone = true;
+            DestroyWindow(hwnd);
+            break;
+        default:
+            return DefWindowProc(hwnd, msg, wp, lp);
+    }
+    return 0;
+}
+
+int ShowInputBox(HWND hwndParent) {
+    g_inputDone = false;
+    HINSTANCE hInst = GetModuleHandle(NULL);
+    
+    WNDCLASSEX wcl = {0};
+    wcl.cbSize = sizeof(WNDCLASSEX);
+    wcl.lpfnWndProc = InputWndProc;
+    wcl.hInstance = hInst;
+    wcl.hCursor = LoadCursor(NULL, IDC_ARROW);
+    wcl.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
+    wcl.lpszClassName = "InputBoxWindow";
+    RegisterClassEx(&wcl);
+
+    HWND hwndDlg = CreateWindowEx(WS_EX_DLGMODALFRAME, "InputBoxWindow", "自動学習数の指定", 
+                                  WS_POPUPWINDOW | WS_CAPTION, CW_USEDEFAULT, CW_USEDEFAULT, 360, 130, 
+                                  hwndParent, NULL, hInst, NULL);
+    
+    EnableWindow(hwndParent, FALSE);
+    
+    RECT rcOwner, rcDlg;
+    GetWindowRect(hwndParent, &rcOwner);
+    GetWindowRect(hwndDlg, &rcDlg);
+    int x = rcOwner.left + ((rcOwner.right - rcOwner.left) - (rcDlg.right - rcDlg.left)) / 2;
+    int y = rcOwner.top + ((rcOwner.bottom - rcOwner.top) - (rcDlg.bottom - rcDlg.top)) / 2;
+    SetWindowPos(hwndDlg, NULL, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+
+    ShowWindow(hwndDlg, SW_SHOW);
+    UpdateWindow(hwndDlg);
+
+    MSG msg;
+    while (!g_inputDone && GetMessage(&msg, NULL, 0, 0)) {
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
+    }
+
+    EnableWindow(hwndParent, TRUE);
+    SetActiveWindow(hwndParent);
+
+    int games = atoi(g_inputBuffer);
+    if (games <= 0) games = 10;
+    return games;
+}
+
+void DrawBoard(HDC hdc, HWND hwnd) {
+    RECT clientRect;
+    GetClientRect(hwnd, &clientRect);
+    int winW = clientRect.right - clientRect.left;
+    int winH = clientRect.bottom - clientRect.top;
+
+    HDC memDC = CreateCompatibleDC(hdc);
+    HBITMAP hMemBitmap = CreateCompatibleBitmap(hdc, winW, winH);
+    HBITMAP hOldBitmap = (HBITMAP)SelectObject(memDC, hMemBitmap);
+
+    HBRUSH hBgBrush = CreateSolidBrush(GetSysColor(COLOR_BTNFACE));
+    FillRect(memDC, &clientRect, hBgBrush);
+    DeleteObject(hBgBrush);
+
+    HBRUSH hGreenBrush = CreateSolidBrush(RGB(34, 139, 34));
+    HBRUSH hOldBrush = (HBRUSH)SelectObject(memDC, hGreenBrush);
+    Rectangle(memDC, 0, 0, BOARD_SIZE * CELL_SIZE, BOARD_SIZE * CELL_SIZE);
+    
+    for (int i = 0; i <= BOARD_SIZE; i++) {
+        MoveToEx(memDC, i * CELL_SIZE, 0, NULL); LineTo(memDC, i * CELL_SIZE, BOARD_SIZE * CELL_SIZE);
+        MoveToEx(memDC, 0, i * CELL_SIZE, NULL); LineTo(memDC, BOARD_SIZE * CELL_SIZE, i * CELL_SIZE);
+    }
+
+    HBRUSH hBlackBrush = CreateSolidBrush(RGB(0, 0, 0));
+    HBRUSH hWhiteBrush = CreateSolidBrush(RGB(255, 255, 255));
+    HPEN hNullPen = CreatePen(PS_NULL, 0, RGB(0, 0, 0));
+    HPEN hOldPen = (HPEN)SelectObject(memDC, hNullPen);
+
+    for (int i = 0; i < BOARD_SIZE; i++) {
+        for (int j = 0; j < BOARD_SIZE; j++) {
+            if (g_game.board[i][j] == BLACK) {
+                SelectObject(memDC, hBlackBrush);
+                Ellipse(memDC, j * CELL_SIZE + 4, i * CELL_SIZE + 4, (j + 1) * CELL_SIZE - 4, (i + 1) * CELL_SIZE - 4);
+            } else if (g_game.board[i][j] == WHITE) {
+                SelectObject(memDC, hWhiteBrush);
+                Ellipse(memDC, j * CELL_SIZE + 4, i * CELL_SIZE + 4, (j + 1) * CELL_SIZE - 4, (i + 1) * CELL_SIZE - 4);
+            }
+        }
+    }
+
+    if (!g_gameOver && ((g_mode == 0) || (g_mode == 1 && g_game.turn == BLACK))) {
+        HBRUSH hGuideBrush = CreateSolidBrush(RGB(100, 220, 100));
+        SelectObject(memDC, hGuideBrush);
+        vector<Move> moves = g_game.getValidMoves();
+        for (size_t i = 0; i < moves.size(); i++) {
+            Ellipse(memDC, moves[i].c * CELL_SIZE + 16, moves[i].r * CELL_SIZE + 16, (moves[i].c + 1) * CELL_SIZE - 16, (moves[i].r + 1) * CELL_SIZE - 16);
+        }
+        DeleteObject(hGuideBrush);
+    }
+
+    SelectObject(memDC, hOldBrush); SelectObject(memDC, hOldPen);
+    DeleteObject(hGreenBrush); DeleteObject(hBlackBrush); DeleteObject(hWhiteBrush); DeleteObject(hNullPen);
+
+    int blackCount = 0, whiteCount = 0;
+    for(int i=0; i<BOARD_SIZE; i++) {
+        for(int j=0; j<BOARD_SIZE; j++) {
+            if (g_game.board[i][j] == BLACK) blackCount++;
+            if (g_game.board[i][j] == WHITE) whiteCount++;
+        }
+    }
+
+    SetBkMode(memDC, TRANSPARENT);
+    char buf[256];
+    
+    if (g_mode == 0)      TextOut(memDC, 420, 15, "モード: 人間 vs 人間", 20);
+    else if (g_mode == 1) TextOut(memDC, 420, 15, "モード: 人間 vs AI (あなた: 黒)", 31);
+    else                  TextOut(memDC, 420, 15, "モード: AI vs AI (観戦・実画面)", 29);
+
+    sprintf(buf, "黒: %d  |  白: %d", blackCount, whiteCount);
+    TextOut(memDC, 420, 40, buf, (int)strlen(buf));
+
+    sprintf(buf, "現在の総データ数: %d 手", g_totalDataCount);
+    TextOut(memDC, 420, 65, buf, (int)strlen(buf));
+
+    sprintf(buf, "AI レベル: %d / 10", g_aiLevel);
+    TextOut(memDC, 420, 95, buf, (int)strlen(buf));
+    
+    SetTextColor(memDC, RGB(80, 80, 80));
+    TextOut(memDC, 420, 115, "※ [1]～[0]キーでAIの強さを変更", 32);
+    TextOut(memDC, 420, 132, "※ [R]キーを押すと学習を維持してリセット", 41);
+    SetTextColor(memDC, RGB(0, 0, 0));
+
+    HBRUSH hBtnBrush = CreateSolidBrush(RGB(220, 220, 220));
+    HBRUSH hActiveBrush = CreateSolidBrush(RGB(150, 200, 255));
+    
+    SelectObject(memDC, (g_mode == 0) ? hActiveBrush : hBtnBrush);
+    RoundRect(memDC, BTN_RECT_PVP.left, BTN_RECT_PVP.top, BTN_RECT_PVP.right, BTN_RECT_PVP.bottom, 5, 5);
+    TextOut(memDC, BTN_RECT_PVP.left + 16, BTN_RECT_PVP.top + 7, "人対人", 6);
+
+    SelectObject(memDC, (g_mode == 1) ? hActiveBrush : hBtnBrush);
+    RoundRect(memDC, BTN_RECT_EVE.left, BTN_RECT_PVE.top, BTN_RECT_PVE.right, BTN_RECT_PVE.bottom, 5, 5);
+    TextOut(memDC, BTN_RECT_PVE.left + 16, BTN_RECT_PVE.top + 7, "人対AI", 6);
+
+    SelectObject(memDC, (g_mode == 2) ? hActiveBrush : hBtnBrush);
+    RoundRect(memDC, BTN_RECT_EVE.left, BTN_RECT_EVE.top, BTN_RECT_EVE.right, BTN_RECT_EVE.bottom, 5, 5);
+    TextOut(memDC, BTN_RECT_EVE.left + 16, BTN_RECT_EVE.top + 7, "AI対AI", 6);
+
+    DeleteObject(hBtnBrush);
+    DeleteObject(hActiveBrush);
+
+    if (g_isPassing) {
+        sprintf(buf, "【パス】 %s の打てる場所がありません", (g_game.turn == BLACK ? "黒" : "白"));
+        TextOut(memDC, 420, 230, buf, (int)strlen(buf));
+    } else if (g_gameOver) {
+        if (blackCount > whiteCount) sprintf(buf, "【ゲーム終了】 黒の勝ち！ [R]で再戦");
+        else if (whiteCount > blackCount) sprintf(buf, "【ゲーム終了】 白の勝ち！ [R]で再戦");
+        else sprintf(buf, "【ゲーム終了】 引き分け！ [R]で再戦");
+        TextOut(memDC, 420, 230, buf, (int)strlen(buf));
+    } else {
+        sprintf(buf, "現在の手番: %s", (g_game.turn == BLACK ? "黒" : "白"));
+        TextOut(memDC, 420, 230, buf, (int)strlen(buf));
+    }
+
+    BitBlt(hdc, 0, 0, winW, winH, memDC, 0, 0, SRCCOPY);
+
+    SelectObject(memDC, hOldBitmap);
+    DeleteObject(hMemBitmap);
+    DeleteDC(memDC);
+}
+
+LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    switch (msg) {
+        case WM_CREATE:
+            trainAIFromDataset(); 
+            g_aiLevel = ShowLevelSelectBox(hwnd);
+
+            if (MessageBox(hwnd, "裏で一括して「AI vs AI 自動高速学習」を実行しますか？", "高速学習の確認", MB_YESNO | MB_ICONQUESTION) == IDYES) {
+                g_totalGames = ShowInputBox(hwnd); 
+                runFastLearning(hwnd);
+            }
+            g_mode = 1;
+            SetTimer(hwnd, 1, 300, NULL);
+            break;
+
+        case WM_TIMER:
+            if (!g_gameOver) {
+                if (g_mode == 2 || (g_mode == 1 && g_game.turn == WHITE)) {
+                    triggerAIMove(hwnd);
+                }
+            }
+            break;
+
+        case WM_KEYDOWN: 
+            if (wp >= '1' && wp <= '9') {
+                g_aiLevel = (int)(wp - '0');
+                InvalidateRect(hwnd, NULL, FALSE);
+            } else if (wp == '0') {
+                g_aiLevel = 10;
+                InvalidateRect(hwnd, NULL, FALSE);
+            } else if (wp == 'R' || wp == 'r') {
+                g_game.reset();
+                g_gameOver = false;
+                g_passCount = 0;
+                g_isPassing = false;
+                InvalidateRect(hwnd, NULL, TRUE);
+            }
+            break;
+
+        case WM_LBUTTONDOWN: {
+            int x = LOWORD(lp); int y = HIWORD(lp);
+
+            if (x >= BTN_RECT_PVP.left && x <= BTN_RECT_PVP.right && y >= BTN_RECT_PVP.top && y <= BTN_RECT_PVP.bottom) {
+                g_mode = 0; InvalidateRect(hwnd, NULL, TRUE); break;
+            }
+            if (x >= BTN_RECT_PVE.left && x <= BTN_RECT_PVE.right && y >= BTN_RECT_PVE.top && y <= BTN_RECT_PVE.bottom) {
+                g_mode = 1; InvalidateRect(hwnd, NULL, TRUE); break;
+            }
+            if (x >= BTN_RECT_EVE.left && x <= BTN_RECT_EVE.right && y >= BTN_RECT_EVE.top && y <= BTN_RECT_EVE.bottom) {
+                g_mode = 2; InvalidateRect(hwnd, NULL, TRUE); break;
+            }
+
+            if (!g_gameOver) {
+                int c = x / CELL_SIZE; int r = y / CELL_SIZE;
+
+                if (g_mode == 0 || (g_mode == 1 && g_game.turn == BLACK)) {
+                    if (g_game.isValidMove(r, c, true)) {
+                        Move humanMove; humanMove.r = r; humanMove.c = c;
+                        saveStepToDataset(humanMove, false);
+                        g_game.turn = -g_game.turn;
+                        g_passCount = 0; g_isPassing = false;
+                        
+                        InvalidateRect(hwnd, NULL, FALSE);
+                        UpdateWindow(hwnd);
+
+                        if (g_mode == 0 && !g_gameOver) {
+                            vector<Move> nextMoves = g_game.getValidMoves();
+                            if (nextMoves.empty()) {
+                                g_passCount++;
+                                Move dummyMove; dummyMove.r = 0; dummyMove.c = 0;
+                                saveStepToDataset(dummyMove, true);
+                                if (g_passCount >= 2) {
+                                    g_gameOver = true;
+                                    saveGameEndMarker();
+                                } else {
+                                    g_isPassing = true;
+                                    g_game.turn = -g_game.turn;
+                                }
+                                InvalidateRect(hwnd, NULL, FALSE);
+                            }
+                        }
+                    }
+                }
+            }
+            break;
+        }
+
+        case WM_PAINT: {
+            PAINTSTRUCT ps; HDC hdc = BeginPaint(hwnd, &ps);
+            DrawBoard(hdc, hwnd); EndPaint(hwnd, &ps);
+            break;
+        }
+
+        case WM_ERASEBKGND:
+            return 1; 
+
+        case WM_DESTROY:
+            KillTimer(hwnd, 1);
+            PostQuitMessage(0);
+            break;
+        default:
+            return DefWindowProc(hwnd, msg, wp, lp);
+    }
+    return 0;
+}
+
+int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR lpCmd, int nShow) {
+    (void)hPrev; (void)lpCmd; srand((unsigned int)time(NULL));
+
+    // 【ファイルを使わない対策】
+    // comctl32.dll を直接ロードして初期化関数を実行する
+    HMODULE hComCtl = LoadLibrary("comctl32.dll");
+    if (hComCtl) {
+        INITCOMMONCONTROLSEXPROC pInitCommonControlsEx = 
+            (INITCOMMONCONTROLSEXPROC)GetProcAddress(hComCtl, "InitCommonControlsEx");
+        if (pInitCommonControlsEx) {
+            INITCOMMONCONTROLSEX icex;
+            icex.dwSize = sizeof(INITCOMMONCONTROLSEX);
+            icex.dwICC = ICC_PROGRESS_CLASS;
+            pInitCommonControlsEx(&icex);
+        }
+    }
+
+    WNDCLASSEX wc = { sizeof(WNDCLASSEX), CS_CLASSDC, WndProc, 0L, 0L, hInst, NULL, LoadCursor(NULL, IDC_ARROW), NULL, NULL, "OthelloAI_v5", NULL };
+    RegisterClassEx(&wc);
+    HWND hwnd = CreateWindow("OthelloAI_v5", "マルチモード対応・高速学習オセロシステム", WS_OVERLAPPEDWINDOW & ~WS_THICKFRAME & ~WS_MAXIMIZEBOX, CW_USEDEFAULT, CW_USEDEFAULT, 760, 440, NULL, NULL, hInst, NULL);
+    ShowWindow(hwnd, nShow); UpdateWindow(hwnd);
+    MSG msg;
+    while (GetMessage(&msg, NULL, 0, 0)) { TranslateMessage(&msg); DispatchMessage(&msg); }
+    
+    UnregisterClass("OthelloAI_v5", wc.hInstance);
+    
+    if (hComCtl) {
+        FreeLibrary(hComCtl);
+    }
+    return (int)msg.wParam;
+}
