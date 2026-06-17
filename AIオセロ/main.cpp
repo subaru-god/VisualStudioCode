@@ -120,9 +120,9 @@ bool g_inputDone = false;
 
 const unsigned char MOVE_PASS = 0xFF;
 
-const RECT BTN_RECT_PVP = { 430, 180, 520, 210 };
-const RECT BTN_RECT_PVE = { 530, 180, 620, 210 };
-const RECT BTN_RECT_EVE = { 630, 180, 720, 210 };
+const RECT BTN_RECT_PVP = { 430, 250, 520, 280 };
+const RECT BTN_RECT_PVE = { 530, 250, 620, 280 };
+const RECT BTN_RECT_EVE = { 630, 250, 720, 280 };
 
 bool g_learningCancelled = false;
 streampos g_gameStartPosition = 0; 
@@ -576,6 +576,69 @@ int ShowInputBox(HWND hwndParent) {
     return games;
 }
 
+Move selectAIMoveForEstimate(Othello& state) {
+    vector<Move> moves = state.getValidMoves();
+    if (moves.empty()) {
+        Move emptyMove; emptyMove.r = -1; emptyMove.c = -1;
+        return emptyMove;
+    }
+    return moves[rand() % moves.size()];
+}
+
+void estimateWinProbabilities(int& blackPct, int& whitePct) {
+    if (g_gameOver) {
+        int blackCount = 0, whiteCount = 0;
+        for (int i = 0; i < BOARD_SIZE; i++) {
+            for (int j = 0; j < BOARD_SIZE; j++) {
+                if (g_game.board[i][j] == BLACK) blackCount++;
+                if (g_game.board[i][j] == WHITE) whiteCount++;
+            }
+        }
+        if (blackCount > whiteCount) { blackPct = 100; whitePct = 0; }
+        else if (whiteCount > blackCount) { blackPct = 0; whitePct = 100; }
+        else { blackPct = 50; whitePct = 50; }
+        return;
+    }
+
+    int blackWins = 0;
+    int whiteWins = 0;
+    int draws = 0;
+    const int simulations = 8;
+    for (int sim = 0; sim < simulations; sim++) {
+        Othello temp = g_game;
+        int passCount = 0;
+        while (true) {
+            vector<Move> moves = temp.getValidMoves();
+            if (moves.empty()) {
+                passCount++;
+                if (passCount >= 2) break;
+                temp.turn = -temp.turn;
+                continue;
+            }
+            passCount = 0;
+            Move m = selectAIMoveForEstimate(temp);
+            if (m.r >= 0) {
+                temp.isValidMove(m.r, m.c, true);
+            }
+            temp.turn = -temp.turn;
+        }
+
+        int blackCount = 0, whiteCount = 0;
+        for (int i = 0; i < BOARD_SIZE; i++) {
+            for (int j = 0; j < BOARD_SIZE; j++) {
+                if (temp.board[i][j] == BLACK) blackCount++;
+                if (temp.board[i][j] == WHITE) whiteCount++;
+            }
+        }
+        if (blackCount > whiteCount) blackWins++;
+        else if (whiteCount > blackCount) whiteWins++;
+        else draws++;
+    }
+
+    blackPct = (blackWins * 100 + draws * 50 + simulations / 2) / simulations;
+    whitePct = (whiteWins * 100 + draws * 50 + simulations / 2) / simulations;
+}
+
 void DrawBoard(HDC hdc, HWND hwnd) {
     RECT clientRect;
     GetClientRect(hwnd, &clientRect);
@@ -590,14 +653,28 @@ void DrawBoard(HDC hdc, HWND hwnd) {
     FillRect(memDC, &clientRect, hBgBrush);
     DeleteObject(hBgBrush);
 
-    HBRUSH hGreenBrush = CreateSolidBrush(RGB(34, 139, 34));
-    HBRUSH hOldBrush = (HBRUSH)SelectObject(memDC, hGreenBrush);
+    RECT infoPanel = { BOARD_SIZE * CELL_SIZE + 12, 10, winW - 10, winH - 10 };
+    HBRUSH hPanelBrush = CreateSolidBrush(RGB(250, 250, 250));
+    FillRect(memDC, &infoPanel, hPanelBrush);
+    HPEN hPanelPen = CreatePen(PS_SOLID, 1, RGB(200, 200, 200));
+    HPEN hSavedPen = (HPEN)SelectObject(memDC, hPanelPen);
+    Rectangle(memDC, infoPanel.left, infoPanel.top, infoPanel.right, infoPanel.bottom);
+    SelectObject(memDC, hSavedPen);
+    DeleteObject(hPanelPen);
+    DeleteObject(hPanelBrush);
+
+    HBRUSH hBoardBrush = CreateSolidBrush(RGB(34, 139, 34));
+    HBRUSH hOldBrush = (HBRUSH)SelectObject(memDC, hBoardBrush);
     Rectangle(memDC, 0, 0, BOARD_SIZE * CELL_SIZE, BOARD_SIZE * CELL_SIZE);
-    
+
+    HPEN hBoardPen = CreatePen(PS_SOLID, 2, RGB(20, 80, 20));
+    HPEN hBoardOldPen = (HPEN)SelectObject(memDC, hBoardPen);
     for (int i = 0; i <= BOARD_SIZE; i++) {
         MoveToEx(memDC, i * CELL_SIZE, 0, NULL); LineTo(memDC, i * CELL_SIZE, BOARD_SIZE * CELL_SIZE);
         MoveToEx(memDC, 0, i * CELL_SIZE, NULL); LineTo(memDC, BOARD_SIZE * CELL_SIZE, i * CELL_SIZE);
     }
+    SelectObject(memDC, hBoardOldPen);
+    DeleteObject(hBoardPen);
 
     HBRUSH hBlackBrush = CreateSolidBrush(RGB(0, 0, 0));
     HBRUSH hWhiteBrush = CreateSolidBrush(RGB(255, 255, 255));
@@ -626,12 +703,16 @@ void DrawBoard(HDC hdc, HWND hwnd) {
         DeleteObject(hGuideBrush);
     }
 
-    SelectObject(memDC, hOldBrush); SelectObject(memDC, hOldPen);
-    DeleteObject(hGreenBrush); DeleteObject(hBlackBrush); DeleteObject(hWhiteBrush); DeleteObject(hNullPen);
+    SelectObject(memDC, hOldBrush);
+    SelectObject(memDC, hOldPen);
+    DeleteObject(hBoardBrush);
+    DeleteObject(hBlackBrush);
+    DeleteObject(hWhiteBrush);
+    DeleteObject(hNullPen);
 
     int blackCount = 0, whiteCount = 0;
-    for(int i=0; i<BOARD_SIZE; i++) {
-        for(int j=0; j<BOARD_SIZE; j++) {
+    for (int i = 0; i < BOARD_SIZE; i++) {
+        for (int j = 0; j < BOARD_SIZE; j++) {
             if (g_game.board[i][j] == BLACK) blackCount++;
             if (g_game.board[i][j] == WHITE) whiteCount++;
         }
@@ -639,55 +720,73 @@ void DrawBoard(HDC hdc, HWND hwnd) {
 
     SetBkMode(memDC, TRANSPARENT);
     char buf[256];
-    
-    if (g_mode == 0)      TextOut(memDC, 420, 15, "モード: 人間 vs 人間", 20);
-    else if (g_mode == 1) TextOut(memDC, 420, 15, "モード: 人間 vs AI (あなた: 黒)", 31);
-    else                  TextOut(memDC, 420, 15, "モード: AI vs AI (観戦・実画面)", 29);
 
-    sprintf(buf, "黒: %d  |  白: %d", blackCount, whiteCount);
-    TextOut(memDC, 420, 40, buf, (int)strlen(buf));
-
-    sprintf(buf, "現在の総データ数: %d 手", g_totalDataCount);
-    TextOut(memDC, 420, 65, buf, (int)strlen(buf));
-
-    sprintf(buf, "AI レベル: %d / 10", g_aiLevel);
-    TextOut(memDC, 420, 95, buf, (int)strlen(buf));
-    
-    SetTextColor(memDC, RGB(80, 80, 80));
-    TextOut(memDC, 420, 115, "※ [1]～[0]キーでAIの強さを変更", 32);
-    TextOut(memDC, 420, 132, "※ [R]キーを押すと学習を維持してリセット", 41);
-    SetTextColor(memDC, RGB(0, 0, 0));
-
-    HBRUSH hBtnBrush = CreateSolidBrush(RGB(220, 220, 220));
-    HBRUSH hActiveBrush = CreateSolidBrush(RGB(150, 200, 255));
-    
-    SelectObject(memDC, (g_mode == 0) ? hActiveBrush : hBtnBrush);
-    RoundRect(memDC, BTN_RECT_PVP.left, BTN_RECT_PVP.top, BTN_RECT_PVP.right, BTN_RECT_PVP.bottom, 5, 5);
-    TextOut(memDC, BTN_RECT_PVP.left + 16, BTN_RECT_PVP.top + 7, "人対人", 6);
-
-    SelectObject(memDC, (g_mode == 1) ? hActiveBrush : hBtnBrush);
-    RoundRect(memDC, BTN_RECT_EVE.left, BTN_RECT_PVE.top, BTN_RECT_PVE.right, BTN_RECT_PVE.bottom, 5, 5);
-    TextOut(memDC, BTN_RECT_PVE.left + 16, BTN_RECT_PVE.top + 7, "人対AI", 6);
-
-    SelectObject(memDC, (g_mode == 2) ? hActiveBrush : hBtnBrush);
-    RoundRect(memDC, BTN_RECT_EVE.left, BTN_RECT_EVE.top, BTN_RECT_EVE.right, BTN_RECT_EVE.bottom, 5, 5);
-    TextOut(memDC, BTN_RECT_EVE.left + 16, BTN_RECT_EVE.top + 7, "AI対AI", 6);
-
-    DeleteObject(hBtnBrush);
-    DeleteObject(hActiveBrush);
-
-    if (g_isPassing) {
-        sprintf(buf, "【パス】 %s の打てる場所がありません", (g_game.turn == BLACK ? "黒" : "白"));
-        TextOut(memDC, 420, 230, buf, (int)strlen(buf));
-    } else if (g_gameOver) {
-        if (blackCount > whiteCount) sprintf(buf, "【ゲーム終了】 黒の勝ち！ [R]で再戦");
-        else if (whiteCount > blackCount) sprintf(buf, "【ゲーム終了】 白の勝ち！ [R]で再戦");
-        else sprintf(buf, "【ゲーム終了】 引き分け！ [R]で再戦");
-        TextOut(memDC, 420, 230, buf, (int)strlen(buf));
-    } else {
-        sprintf(buf, "現在の手番: %s", (g_game.turn == BLACK ? "黒" : "白"));
-        TextOut(memDC, 420, 230, buf, (int)strlen(buf));
+    SetTextColor(memDC, RGB(245, 245, 245));
+    for (int i = 0; i < BOARD_SIZE; i++) {
+        char txt[2] = { (char)('A' + i), '\0' };
+        TextOut(memDC, i * CELL_SIZE + 18, BOARD_SIZE * CELL_SIZE + 6, txt, 1);
     }
+    for (int i = 0; i < BOARD_SIZE; i++) {
+        char txt[2] = { (char)('1' + i), '\0' };
+        TextOut(memDC, 6, i * CELL_SIZE + 16, txt, 1);
+    }
+
+    int infoX = BOARD_SIZE * CELL_SIZE + 28;
+    int infoY = 26;
+    int lineHeight = 32;
+
+    SetTextColor(memDC, RGB(0, 0, 0));
+    sprintf(buf, "AIオセロ %s", (g_mode == 0 ? "(PVP)" : (g_mode == 1 ? "(PVE)" : "(EVE)")));
+    TextOut(memDC, infoX, infoY, buf, (int)strlen(buf));
+
+    TextOut(memDC, infoX, infoY + lineHeight * 1, "――――――――――――――――――――", 24);
+
+    sprintf(buf, "黒: %d", blackCount);
+    TextOut(memDC, infoX, infoY + lineHeight * 2, buf, (int)strlen(buf));
+    sprintf(buf, "白: %d", whiteCount);
+    TextOut(memDC, infoX, infoY + lineHeight * 3, buf, (int)strlen(buf));
+
+    int blackProb = 50, whiteProb = 50;
+    estimateWinProbabilities(blackProb, whiteProb);
+    sprintf(buf, "勝率予測: 黒 %d%% / 白 %d%%", blackProb, whiteProb);
+    TextOut(memDC, infoX, infoY + lineHeight * 4, buf, (int)strlen(buf));
+
+    sprintf(buf, "AIレベル: %d / 10", g_aiLevel);
+    TextOut(memDC, infoX, infoY + lineHeight * 5, buf, (int)strlen(buf));
+
+    sprintf(buf, "累計学習手数: %d", g_totalDataCount);
+    TextOut(memDC, infoX, infoY + lineHeight * 6, buf, (int)strlen(buf));
+
+    RECT buttonRects[3];
+    buttonRects[0] = BTN_RECT_PVP;
+    buttonRects[1] = BTN_RECT_PVE;
+    buttonRects[2] = BTN_RECT_EVE;
+    const char* buttonLabels[3] = { "PVP: 先手黒 vs 先手白", "PVE: 黒 人間 / 白 AI", "EVE: AI vs AI" };
+
+    for (int i = 0; i < 3; i++) {
+        HBRUSH hBtnBrush = CreateSolidBrush((g_mode == i ? RGB(60, 130, 220) : RGB(220, 220, 220)));
+        HPEN hBtnBorder = CreatePen(PS_SOLID, 1, RGB(150, 150, 150));
+        HPEN hOldBorder = (HPEN)SelectObject(memDC, hBtnBorder);
+        HBRUSH hOldBtnBrush = (HBRUSH)SelectObject(memDC, hBtnBrush);
+        RoundRect(memDC, buttonRects[i].left, buttonRects[i].top, buttonRects[i].right, buttonRects[i].bottom, 12, 12);
+        SelectObject(memDC, hOldBtnBrush);
+        SelectObject(memDC, hOldBorder);
+        DeleteObject(hBtnBrush);
+        DeleteObject(hBtnBorder);
+
+        SetTextColor(memDC, (g_mode == i ? RGB(255, 255, 255) : RGB(0, 0, 0)));
+        int textX = buttonRects[i].left + 8;
+        int textY = buttonRects[i].top + 6;
+        TextOut(memDC, textX, textY, buttonLabels[i], (int)strlen(buttonLabels[i]));
+    }
+
+    SetTextColor(memDC, RGB(120, 120, 120));
+    sprintf(buf, "[1]-[0]: AI強度変更");
+    TextOut(memDC, infoX, winH - 80, buf, (int)strlen(buf));
+    sprintf(buf, "[R]: リセット (学習継続)");
+    TextOut(memDC, infoX, winH - 54, buf, (int)strlen(buf));
+    sprintf(buf, "左クリックで石を配置します");
+    TextOut(memDC, infoX, winH - 28, buf, (int)strlen(buf));
 
     BitBlt(hdc, 0, 0, winW, winH, memDC, 0, 0, SRCCOPY);
 
@@ -718,7 +817,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             }
             break;
 
-        case WM_KEYDOWN: 
+        case WM_KEYDOWN:
             if (wp >= '1' && wp <= '9') {
                 g_aiLevel = (int)(wp - '0');
                 InvalidateRect(hwnd, NULL, FALSE);
