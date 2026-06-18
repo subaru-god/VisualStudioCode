@@ -124,10 +124,14 @@ const RECT BTN_RECT_EVE = { 630, 250, 720, 280 };
 bool g_learningCancelled = false;
 streampos g_gameStartPosition = 0; 
 
+bool g_supportMode = false;
+int g_supportTarget = BLACK; // BLACK or WHITE
+
 void convertOldLogsToBinary();
 void trainAIFromDataset();
 void saveStepToDataset(Move nextMove, bool isPass);
 void saveGameEndMarker();
+void estimateWinProbabilitiesForState(const Othello& state, int& blackPct, int& whitePct);
 void runFastLearning(HWND hwnd);
 void triggerAIMove(HWND hwnd);
 void truncateUnfinishedGame();
@@ -580,27 +584,13 @@ Move selectAIMoveForEstimate(Othello& state) {
     return moves[rand() % moves.size()];
 }
 
-void estimateWinProbabilities(int& blackPct, int& whitePct) {
-    if (g_gameOver) {
-        int blackCount = 0, whiteCount = 0;
-        for (int i = 0; i < BOARD_SIZE; i++) {
-            for (int j = 0; j < BOARD_SIZE; j++) {
-                if (g_game.board[i][j] == BLACK) blackCount++;
-                if (g_game.board[i][j] == WHITE) whiteCount++;
-            }
-        }
-        if (blackCount > whiteCount) { blackPct = 100; whitePct = 0; }
-        else if (whiteCount > blackCount) { blackPct = 0; whitePct = 100; }
-        else { blackPct = 50; whitePct = 50; }
-        return;
-    }
-
+void estimateWinProbabilitiesForState(const Othello& state, int& blackPct, int& whitePct) {
     int blackWins = 0;
     int whiteWins = 0;
     int draws = 0;
-    const int simulations = 8;
+    const int simulations = 6;
     for (int sim = 0; sim < simulations; sim++) {
-        Othello temp = g_game;
+        Othello temp = state;
         int passCount = 0;
         while (true) {
             vector<Move> moves = temp.getValidMoves();
@@ -632,6 +622,24 @@ void estimateWinProbabilities(int& blackPct, int& whitePct) {
 
     blackPct = (blackWins * 100 + draws * 50 + simulations / 2) / simulations;
     whitePct = (whiteWins * 100 + draws * 50 + simulations / 2) / simulations;
+}
+
+void estimateWinProbabilities(int& blackPct, int& whitePct) {
+    if (g_gameOver) {
+        int blackCount = 0, whiteCount = 0;
+        for (int i = 0; i < BOARD_SIZE; i++) {
+            for (int j = 0; j < BOARD_SIZE; j++) {
+                if (g_game.board[i][j] == BLACK) blackCount++;
+                if (g_game.board[i][j] == WHITE) whiteCount++;
+            }
+        }
+        if (blackCount > whiteCount) { blackPct = 100; whitePct = 0; }
+        else if (whiteCount > blackCount) { blackPct = 0; whitePct = 100; }
+        else { blackPct = 50; whitePct = 50; }
+        return;
+    }
+
+    estimateWinProbabilitiesForState(g_game, blackPct, whitePct);
 }
 
 void DrawBoard(HDC hdc, HWND hwnd) {
@@ -688,14 +696,38 @@ void DrawBoard(HDC hdc, HWND hwnd) {
         }
     }
 
+    vector<Move> validMoves;
     if (!g_gameOver && ((g_mode == 0) || (g_mode == 1 && g_game.turn == BLACK))) {
+        validMoves = g_game.getValidMoves();
         HBRUSH hGuideBrush = CreateSolidBrush(RGB(100, 220, 100));
         SelectObject(memDC, hGuideBrush);
-        vector<Move> moves = g_game.getValidMoves();
-        for (size_t i = 0; i < moves.size(); i++) {
-            Ellipse(memDC, moves[i].c * CELL_SIZE + 16, moves[i].r * CELL_SIZE + 16, (moves[i].c + 1) * CELL_SIZE - 16, (moves[i].r + 1) * CELL_SIZE - 16);
+        for (size_t i = 0; i < validMoves.size(); i++) {
+            Ellipse(memDC, validMoves[i].c * CELL_SIZE + 16, validMoves[i].r * CELL_SIZE + 16, (validMoves[i].c + 1) * CELL_SIZE - 16, (validMoves[i].r + 1) * CELL_SIZE - 16);
         }
         DeleteObject(hGuideBrush);
+
+        if (g_supportMode && !validMoves.empty()) {
+            HBRUSH hSupportBrush = CreateSolidBrush(RGB(240, 200, 80));
+            SelectObject(memDC, hSupportBrush);
+            int bestScore = -1000;
+            Move bestMove = { -1, -1 };
+            for (size_t i = 0; i < validMoves.size(); i++) {
+                Othello testState = g_game;
+                testState.turn = g_supportTarget;
+                testState.isValidMove(validMoves[i].r, validMoves[i].c, true);
+                int blackPct, whitePct;
+                estimateWinProbabilitiesForState(testState, blackPct, whitePct);
+                int score = (g_supportTarget == BLACK ? blackPct : whitePct);
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestMove = validMoves[i];
+                }
+            }
+            if (bestMove.r >= 0) {
+                Ellipse(memDC, bestMove.c * CELL_SIZE + 10, bestMove.r * CELL_SIZE + 10, (bestMove.c + 1) * CELL_SIZE - 10, (bestMove.r + 1) * CELL_SIZE - 10);
+            }
+            DeleteObject(hSupportBrush);
+        }
     }
 
     SelectObject(memDC, hOldBrush);
@@ -756,7 +788,7 @@ void DrawBoard(HDC hdc, HWND hwnd) {
     buttonRects[0] = BTN_RECT_PVP;
     buttonRects[1] = BTN_RECT_PVE;
     buttonRects[2] = BTN_RECT_EVE;
-    const char* buttonLabels[3] = { "PVP: 先手黒 vs 先手白", "PVE: 黒 人間 / 白 AI", "EVE: AI vs AI" };
+    const char* buttonLabels[3] = { "人対人", "人対AI", "AI対AI" };
 
     for (int i = 0; i < 3; i++) {
         HBRUSH hBtnBrush = CreateSolidBrush((g_mode == i ? RGB(60, 130, 220) : RGB(220, 220, 220)));
@@ -777,11 +809,17 @@ void DrawBoard(HDC hdc, HWND hwnd) {
 
     SetTextColor(memDC, RGB(120, 120, 120));
     sprintf(buf, "[1]-[0]: AI強度変更");
-    TextOut(memDC, infoX, winH - 80, buf, (int)strlen(buf));
+    TextOut(memDC, infoX, winH - 140, buf, (int)strlen(buf));
     sprintf(buf, "[R]: リセット (学習継続)");
-    TextOut(memDC, infoX, winH - 54, buf, (int)strlen(buf));
+    TextOut(memDC, infoX, winH - 112, buf, (int)strlen(buf));
+    sprintf(buf, "[S]: サポート ON/OFF");
+    TextOut(memDC, infoX, winH - 84, buf, (int)strlen(buf));
+    sprintf(buf, "[T]: サポート対象切替");
+    TextOut(memDC, infoX, winH - 56, buf, (int)strlen(buf));
     sprintf(buf, "左クリックで石を配置します");
     TextOut(memDC, infoX, winH - 28, buf, (int)strlen(buf));
+    sprintf(buf, "サポート: %s %s", (g_supportMode ? "ON" : "OFF"), (g_supportTarget == BLACK ? "黒" : "白"));
+    TextOut(memDC, infoX, winH - 168, buf, (int)strlen(buf));
 
     BitBlt(hdc, 0, 0, winW, winH, memDC, 0, 0, SRCCOPY);
 
@@ -825,6 +863,12 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 g_passCount = 0;
                 g_isPassing = false;
                 InvalidateRect(hwnd, NULL, TRUE);
+            } else if (wp == 'S' || wp == 's') {
+                g_supportMode = !g_supportMode;
+                InvalidateRect(hwnd, NULL, FALSE);
+            } else if (wp == 'T' || wp == 't') {
+                g_supportTarget = (g_supportTarget == BLACK ? WHITE : BLACK);
+                InvalidateRect(hwnd, NULL, FALSE);
             }
             break;
 
