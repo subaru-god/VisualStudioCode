@@ -11,8 +11,6 @@
 
 using namespace std;
 
-// 【ファイルを使わない対策】
-// コモンコントロール初期化関数の型定義と関数ポインタ
 typedef BOOL (WINAPI *INITCOMMONCONTROLSEXPROC)(const INITCOMMONCONTROLSEX*);
 
 const int BOARD_SIZE = 8;
@@ -102,7 +100,6 @@ vector<Move> Othello::getValidMoves() {
     return moves;
 }
 
-// グローバル変数
 Othello g_game;
 int g_mode = 1; 
 int g_passCount = 0;
@@ -127,7 +124,6 @@ const RECT BTN_RECT_EVE = { 630, 250, 720, 280 };
 bool g_learningCancelled = false;
 streampos g_gameStartPosition = 0; 
 
-// --- 前方宣言 ---
 void convertOldLogsToBinary();
 void trainAIFromDataset();
 void saveStepToDataset(Move nextMove, bool isPass);
@@ -187,7 +183,6 @@ void convertOldLogsToBinary() {
                     string token;
                     string tempLine = line;
                     
-                    // 【W8004対策】ループ条件を整理し、未使用のpos代入警告を完全に排除
                     while (!tempLine.empty() && idx < 67) {
                         size_t nextPos = tempLine.find(',');
                         if (nextPos == string::npos) {
@@ -903,8 +898,6 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR lpCmd, int nShow) {
     (void)hPrev; (void)lpCmd; srand((unsigned int)time(NULL));
 
-    // 【ファイルを使わない対策】
-    // comctl32.dll を直接ロードして初期化関数を実行する
     HMODULE hComCtl = LoadLibrary("comctl32.dll");
     if (hComCtl) {
         INITCOMMONCONTROLSEXPROC pInitCommonControlsEx = 
