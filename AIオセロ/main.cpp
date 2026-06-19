@@ -127,6 +127,18 @@ streampos g_gameStartPosition = 0;
 bool g_supportMode = false;
 int g_supportTarget = BLACK;
 
+struct FlipAnimation {
+    int r;
+    int c;
+    int fromColor;
+    int toColor;
+};
+
+bool g_isAnimating = false;
+int g_animationStep = 0;
+const int ANIMATION_STEPS = 6;
+vector<FlipAnimation> g_flipAnimations;
+
 void convertOldLogsToBinary();
 void trainAIFromDataset();
 void saveStepToDataset(Move nextMove, bool isPass);
@@ -135,6 +147,8 @@ void estimateWinProbabilitiesForState(const Othello& state, int& blackPct, int& 
 void runFastLearning(HWND hwnd);
 void triggerAIMove(HWND hwnd);
 void truncateUnfinishedGame();
+vector<FlipAnimation> getFlipAnimationsForMove(int r, int c, int player);
+FlipAnimation* findFlipAnimation(int r, int c);
 
 Move selectAIMoveBasedOnLevel(const vector<Move>& moves) {
     int rate = (g_aiLevel - 1) * 11;
@@ -322,6 +336,56 @@ void truncateUnfinishedGame() {
     }
 }
 
+vector<FlipAnimation> getFlipAnimationsForMove(int r, int c, int player) {
+    vector<FlipAnimation> animations;
+    if (r < 0 || r >= BOARD_SIZE || c < 0 || c >= BOARD_SIZE) return animations;
+    if (g_game.board[r][c] != EMPTY) return animations;
+
+    for (int i = 0; i < 8; i++) {
+        int nr = r + dr[i];
+        int nc = c + dc[i];
+        vector<Move> line;
+
+        while (nr >= 0 && nr < BOARD_SIZE && nc >= 0 && nc < BOARD_SIZE && g_game.board[nr][nc] == -player) {
+            Move m; m.r = nr; m.c = nc;
+            line.push_back(m);
+            nr += dr[i];
+            nc += dc[i];
+        }
+
+        if (!line.empty() && nr >= 0 && nr < BOARD_SIZE && nc >= 0 && nc < BOARD_SIZE && g_game.board[nr][nc] == player) {
+            for (size_t j = 0; j < line.size(); j++) {
+                FlipAnimation anim;
+                anim.r = line[j].r;
+                anim.c = line[j].c;
+                anim.fromColor = -player;
+                anim.toColor = player;
+                animations.push_back(anim);
+            }
+        }
+    }
+
+    if (!animations.empty()) {
+        FlipAnimation stoneAnim;
+        stoneAnim.r = r;
+        stoneAnim.c = c;
+        stoneAnim.fromColor = EMPTY;
+        stoneAnim.toColor = player;
+        animations.push_back(stoneAnim);
+    }
+
+    return animations;
+}
+
+FlipAnimation* findFlipAnimation(int r, int c) {
+    for (size_t i = 0; i < g_flipAnimations.size(); i++) {
+        if (g_flipAnimations[i].r == r && g_flipAnimations[i].c == c) {
+            return &g_flipAnimations[i];
+        }
+    }
+    return NULL;
+}
+
 bool processSingleMove() {
     if (g_gameOver) return false;
 
@@ -469,9 +533,31 @@ void runFastLearning(HWND hwnd) {
 }
 
 void triggerAIMove(HWND hwnd) {
-    if (g_gameOver) return;
+    if (g_gameOver || g_isAnimating) return;
 
     if (g_mode == 2 || (g_mode == 1 && g_game.turn == WHITE)) {
+        vector<FlipAnimation> animations;
+        if (!g_gameOver) {
+            vector<Move> moves = g_game.getValidMoves();
+            if (!moves.empty()) {
+                Move aiMove = selectAIMoveBasedOnLevel(moves);
+                animations = getFlipAnimationsForMove(aiMove.r, aiMove.c, g_game.turn);
+                if (!animations.empty()) {
+                    saveStepToDataset(aiMove, false);
+                    g_flipAnimations = animations;
+                    g_isAnimating = true;
+                    g_animationStep = 0;
+                    g_passCount = 0;
+                    g_isPassing = false;
+                    g_game.isValidMove(aiMove.r, aiMove.c, true);
+                    g_game.turn = -g_game.turn;
+                    InvalidateRect(hwnd, NULL, FALSE);
+                    UpdateWindow(hwnd);
+                    return;
+                }
+            }
+        }
+
         processSingleMove();
         InvalidateRect(hwnd, NULL, FALSE);
         UpdateWindow(hwnd);
@@ -686,13 +772,45 @@ void DrawBoard(HDC hdc, HWND hwnd) {
 
     for (int i = 0; i < BOARD_SIZE; i++) {
         for (int j = 0; j < BOARD_SIZE; j++) {
-            if (g_game.board[i][j] == BLACK) {
-                SelectObject(memDC, hBlackBrush);
-                Ellipse(memDC, j * CELL_SIZE + 4, i * CELL_SIZE + 4, (j + 1) * CELL_SIZE - 4, (i + 1) * CELL_SIZE - 4);
-            } else if (g_game.board[i][j] == WHITE) {
-                SelectObject(memDC, hWhiteBrush);
-                Ellipse(memDC, j * CELL_SIZE + 4, i * CELL_SIZE + 4, (j + 1) * CELL_SIZE - 4, (i + 1) * CELL_SIZE - 4);
+            FlipAnimation* anim = g_isAnimating ? findFlipAnimation(i, j) : NULL;
+            int currentColor = g_game.board[i][j];
+            int drawColor = currentColor;
+            double widthScale = 1.0;
+            double heightScale = 1.0;
+
+            if (anim) {
+                double progress = (double)g_animationStep / (double)ANIMATION_STEPS;
+                double cosval = fabs(cos(progress * 3.14159265));
+                widthScale = 0.15 + 0.85 * cosval;
+                heightScale = 1.0;
+
+                if (anim->fromColor == EMPTY) {
+                    drawColor = anim->toColor;
+                    widthScale = 0.15 + 0.85 * progress;
+                } else {
+                    if (progress < 0.5) {
+                        drawColor = anim->fromColor;
+                    } else {
+                        drawColor = anim->toColor;
+                    }
+                }
             }
+
+            if (drawColor == BLACK) {
+                SelectObject(memDC, hBlackBrush);
+            } else if (drawColor == WHITE) {
+                SelectObject(memDC, hWhiteBrush);
+            } else {
+                continue;
+            }
+
+            int pieceWidth = (int)((CELL_SIZE - 8) * widthScale);
+            int pieceHeight = (int)((CELL_SIZE - 8) * heightScale);
+            int left = j * CELL_SIZE + 4 + ((CELL_SIZE - 8) - pieceWidth) / 2;
+            int top = i * CELL_SIZE + 4 + ((CELL_SIZE - 8) - pieceHeight) / 2;
+            int right = left + pieceWidth;
+            int bottom = top + pieceHeight;
+            Ellipse(memDC, left, top, right, bottom);
         }
     }
 
@@ -843,6 +961,16 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             break;
 
         case WM_TIMER:
+            if (g_isAnimating) {
+                g_animationStep++;
+                if (g_animationStep > ANIMATION_STEPS) {
+                    g_isAnimating = false;
+                    g_animationStep = 0;
+                    g_flipAnimations.clear();
+                }
+                InvalidateRect(hwnd, NULL, FALSE);
+                break;
+            }
             if (!g_gameOver) {
                 if (g_mode == 2 || (g_mode == 1 && g_game.turn == WHITE)) {
                     triggerAIMove(hwnd);
@@ -885,15 +1013,19 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 g_mode = 2; InvalidateRect(hwnd, NULL, TRUE); break;
             }
 
-            if (!g_gameOver) {
+            if (!g_gameOver && !g_isAnimating) {
                 int c = x / CELL_SIZE; int r = y / CELL_SIZE;
 
                 if (g_mode == 0 || (g_mode == 1 && g_game.turn == BLACK)) {
-                    if (g_game.isValidMove(r, c, true)) {
+                    vector<FlipAnimation> animations = getFlipAnimationsForMove(r, c, g_game.turn);
+                    if (!animations.empty() && g_game.isValidMove(r, c, true)) {
                         Move humanMove; humanMove.r = r; humanMove.c = c;
                         saveStepToDataset(humanMove, false);
-                        g_game.turn = -g_game.turn;
+                        g_flipAnimations = animations;
+                        g_isAnimating = true;
+                        g_animationStep = 0;
                         g_passCount = 0; g_isPassing = false;
+                        g_game.turn = -g_game.turn;
                         
                         InvalidateRect(hwnd, NULL, FALSE);
                         UpdateWindow(hwnd);
