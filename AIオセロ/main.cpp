@@ -125,7 +125,7 @@ bool g_learningCancelled = false;
 streampos g_gameStartPosition = 0; 
 
 bool g_supportMode = false;
-int g_supportTarget = BLACK; // BLACK or WHITE
+int g_supportTarget = BLACK;
 
 void convertOldLogsToBinary();
 void trainAIFromDataset();
