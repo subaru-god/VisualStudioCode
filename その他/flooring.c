@@ -11,7 +11,7 @@ int main(void) {
         sub = input_num;
         printf("%d", input_num);
         
-        while(sub>0) {
+        while(sub>1) {
             sub--;
             printf("×%d", sub);
         }
