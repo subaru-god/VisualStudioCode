@@ -28,16 +28,17 @@ int main(void) {
 
         printf("%d\n", sub2);
 
-        continue:
-        printf("続行しますか？ y/n");
+        continue_choice:
+        printf("続行しますか？ y/n：");
         scanf(" %c", &txt);
 
         if (txt == 'n') {
             return(0);
         } else if(txt == 'y') {
+            continue;
         } else {
-            printf("半角数字のyかnを入力してください");
-            goto continue;
+            printf("\n半角英字のyかnを入力してください\n");
+            goto continue_choice;
         }
         
     }
