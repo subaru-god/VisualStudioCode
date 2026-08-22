@@ -3,6 +3,7 @@
 int main(void) {
     int input_num;
     unsigned int answer,sub,sub2;
+    char txt;
     while(1) {
         printf("好きな数字を入力してください：");
         scanf(" %d", &input_num);
@@ -15,7 +16,7 @@ int main(void) {
             printf("×%d", sub);
         }
         
-        printf("=¥n");
+        printf("=\n");
 
         sub = input_num;
         sub2 = 1;
@@ -25,6 +26,20 @@ int main(void) {
             sub--;
         }
 
-        printf("%d", sub2);
+        printf("%d\n", sub2);
+
+        continyu:
+        printf("続行しますか？ y/n");
+        scanf(" %c", &txt);
+
+        if (txt == 'n') {
+            return(0);
+        } else if(txt == 'y') {
+            break;
+        } else {
+            printf("半角数字のyかnを入力してください");
+            goto continyu;
+        }
+        
     }
 }
