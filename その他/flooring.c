@@ -1,8 +1,8 @@
 #include <stdio.h>
 
 int main(void) {
-    int = input_num;
-    unsigned int = answer,sub,sub2;
+    int input_num;
+    unsigned int answer,sub,sub2;
     while(1) {
         printf("好きな数字を入力してください：");
         scanf(" %d", &input_num);
@@ -11,7 +11,7 @@ int main(void) {
         printf("%d", input_num);
         
         while(sub>0) {
-            sub--
+            sub--;
             printf("×%d", sub);
         }
         
@@ -22,7 +22,7 @@ int main(void) {
 
         while(sub>0) {
             sub2 = sub*sub2;
-            sub--
+            sub--;
         }
 
         printf("%d", sub2);
