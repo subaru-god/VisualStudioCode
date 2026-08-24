@@ -5,20 +5,20 @@ int num;
 
     printf("これは訓練です\n繰り返します。\nこれは訓練です");
 
-        sleep(2);
+    Sleep(2);
 
-            printf("エラーが発生しました。\n修復を試みます\n\n");
-                system(PAUSE);
-                    system(color 0A);
+    printf("エラーが発生しました。\n修復を試みます\n\n");
+    system("PAUSE");
+    system("color 0A");
 
-                        printf("There are any errors.\nSo, I will restart for me.\n\n");
+    printf("There are any errors.\nSo, I will restart for me.\n\n");
 
-                            for(num=0; num>20; num++) {
-                                    printf("error error error\n");
-                                            }
-                                                system(shutdown /s /t 5);
+    for(num=0; num>20; num++) {
+        printf("error error error\n");
+        }
+    system("shutdown /s /t 5");
 
-                                                    while(1) {
-                                                            printf("error error error\n");
-                                                                }
-                                                                }
+    while(1) {
+        printf("error error error\n");
+    }
+}
