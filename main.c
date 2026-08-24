@@ -13,7 +13,7 @@ int num;
 
     printf("There are any errors.\nSo, I will restart for me.\n\n");
 
-    for(num=0; num>20; num++) {
+    for(num=0; num<20; num++) {
         printf("error error error\n");
         }
     system("shutdown /s /t 5");
