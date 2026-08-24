@@ -1,11 +1,13 @@
 #include <stdio.h>
+#include <stdlib.h>
+#include <windows.h>
 
 int main (void) {
 int num;
 
     printf("これは訓練です\n繰り返します。\nこれは訓練です");
 
-    Sleep(2);
+    Sleep(2000);
 
     printf("エラーが発生しました。\n修復を試みます\n\n");
     system("PAUSE");
