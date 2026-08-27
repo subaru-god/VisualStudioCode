@@ -2,25 +2,45 @@
 #include <stdlib.h>
 #include <windows.h>
 
-int main (void) {
-int num;
+int main(void) {
+    int num;
+    // Windows‚ÌƒRƒ“ƒ\[ƒ‹FƒR[ƒhi”wŒiF + •¶šFj
+    // 0 = •, A = –¾‚é‚¢—Î, B = …F, C = Ô, D = ‡, E = ‰©F, F = ”’
+    char *rainbow_colors[] = {
+        "color 0C", // Ô
+        "color 0E", // ‰©
+        "color 0A", // —Î
+        "color 0B", // …F
+        "color 01", // Â
+        "color 0D", // ‡
+        "color 0F"  // ”’
+    };
+    int color_count = sizeof(rainbow_colors) / sizeof(rainbow_colors[0]);
 
-    printf("ã“ã‚Œã¯è¨“ç·´ã§ã™\nç¹°ã‚Šè¿”ã—ã¾ã™ã€‚\nã“ã‚Œã¯è¨“ç·´ã§ã™");
+    printf("‚±‚ê‚ÍŒP—û‚Å‚·\nŒJ‚è•Ô‚µ‚Ü‚·\n‚±‚ê‚ÍŒP—û‚Å‚·\n\n");
 
     Sleep(2000);
 
-    printf("ã‚¨ãƒ©ãƒ¼ãŒç™ºç”Ÿã—ã¾ã—ãŸã€‚\nä¿®å¾©ã‚’è©¦ã¿ã¾ã™\n\n");
+    printf("\n\nƒGƒ‰[‚ª”­¶‚µ‚Ü‚µ‚½B\nC•œ‚ğ‚İ‚Ü‚·....\n\n");
     system("PAUSE");
-    system("color 0A");
 
     printf("There are any errors.\nSo, I will restart for me.\n\n");
 
-    for(num=0; num<20; num++) {
+    for (num = 0; num < 20; num++) {
         printf("error error error\n");
-        }
-    system("shutdown /s /t 5");
-
-    while(1) {
-        printf("error error error\n");
+        system(rainbow_colors[num % color_count]); // F‚ğ‡”Ô‚É•ÏX
+        Sleep(100); // F‚Ì•Ï‰»‚ªŒ©‚¦‚é‚æ‚¤‚É­‚µƒEƒFƒCƒg
     }
+
+    // ’ˆÓ: Às‚·‚é‚ÆPC‚ªƒVƒƒƒbƒgƒ_ƒEƒ“‚µ‚Ü‚·
+    system("shutdown /s /t 20");
+
+    while (1) {
+        printf("error error error\n");
+        system(rainbow_colors[num % color_count]);
+        num++;
+        Sleep(100);
+    }
+
+    return 0;
 }
