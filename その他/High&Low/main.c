@@ -1,0 +1,99 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+#include <windows.h>
+
+//gcc -finput-charset=cp932 -fexec-charset=cp932 main.c -o main && main.exe
+
+int make_random_num(void) {
+    int new_num = rand() %50 + 1;
+    return (new_num);
+}
+
+int point_sys(int point, int sys) {
+    if(sys == 0) {
+        point = point * 1.5;
+    }else if(sys == 1){
+    }
+    return point;
+}
+
+int main(void){
+    int new_num = 0, count, cache1, point, use, sys, mux_point;
+    char input[5];
+    char input1;
+    char High[] = "High";
+    char Low[] = "Low";
+
+    srand((unsigned int)time(NULL));
+    new_num = make_random_num();
+
+    start:
+    printf("\nHigh&Lowゲームへようこそ！！\n\n最小の数が1   ||   最大の数が50です。\n\n");
+    printf("ランダムに数字が表示されるので\n次の数字が今の数字より大きい(High)か小さい(Low)かを予想してね。\n\n");
+    printf("まずは掛け金を決めます\n\n");
+    system("pause");
+    point = rand() %1000 + 1;
+    printf("あなたの最初の所持ポイントは%dPです。\n\n", point);
+    mux_point = point;
+    count = 1;
+
+    while(1) {
+
+        do {
+            printf("%d回目\n%dP\n\n%dよりも大きい(High)？小さい(Low)？：", count, point, new_num);
+            scanf(" %4s", input);
+        } while(strcmp(input, High) != 0 && strcmp(input, Low) != 0); // input != High && input != Low　inputがHighでないかつinputがLowでないならもう一度
+
+        do {
+            printf("何ポイント掛ける？(半角数字のみで)：");
+            scanf(" %d", &use);
+        } while(use>point && use <= 0);
+
+        point -= use;
+
+        printf("結果は...");
+        cache1 = new_num;
+        Sleep(1000);
+
+        new_num = make_random_num();
+        printf("%d\n\n", new_num);
+
+        if(cache1 == new_num) {
+            printf("同じ数なのでもう一度\n\n");
+            point += use;
+        } else if (strcmp(input, Low)==0 && cache1>new_num) {
+            sys = 0;
+            cache1 = point;
+            point += point_sys(use, sys);
+            count++;
+            printf("正解！！  %dP獲得！！\n\n", point-cache1);
+        } else if (strcmp(input, High)==0 && cache1<new_num) {
+            sys = 0;
+            cache1 = point;
+            point += point_sys(use, sys);
+            count++;
+            printf("正解！！  %dP獲得！！\n\n", point-cache1);
+        }else {
+            printf("残念  %dP失いました\n\n", use);
+            count++;
+        }
+        
+        if(point <= 0) {
+            printf("所持ポイントが0P以下なのでGAME OVERです。\n最大ポイントは%dPでした。", mux_point);
+            break;
+        }else if(mux_point<point) {
+            mux_point = point;
+        }
+    }
+
+    do {
+        printf("もういちどやる？ y/n：");
+        scanf(" %c", &input1);
+    }while(input1 != 'y' && input1 != 'n');
+    
+    if(input1 == 'y') {
+        goto start;
+    }else return 0;
+}
