@@ -20,21 +20,21 @@ int point_sys(int point, int sys) {
 }
 
 int main(void){
-    int new_num = 0, count, cache1, point, use, sys, mux_point;
+    int new_num = 0, count, cache1, point, use, sys, mux_point, start_point;
     char input[5];
     char input1;
     char High[] = "High";
     char Low[] = "Low";
 
-    srand((unsigned int)time(NULL));
-    new_num = make_random_num();
-
     start:
     printf("\nHigh&Lowゲームへようこそ！！\n\n最小の数が1   ||   最大の数が50です。\n\n");
     printf("ランダムに数字が表示されるので\n次の数字が今の数字より大きい(High)か小さい(Low)かを予想してね。\n\n");
-    printf("まずは掛け金を決めます\n\n");
+    printf("まずは最初の所持ポイントを決めます\n\n");
     system("pause");
-    point = rand() %1000 + 1;
+    srand((unsigned int)time(NULL));
+    new_num = make_random_num();
+    point = rand() % 801 + 200;
+    start_point = point;
     printf("あなたの最初の所持ポイントは%dPです。\n\n", point);
     mux_point = point;
     count = 1;
@@ -49,7 +49,7 @@ int main(void){
         do {
             printf("何ポイント掛ける？(半角数字のみで)：");
             scanf(" %d", &use);
-        } while(use>point && use <= 0);
+        } while(use>point || use <= 0);
 
         point -= use;
 
@@ -81,7 +81,7 @@ int main(void){
         }
         
         if(point <= 0) {
-            printf("所持ポイントが0P以下なのでGAME OVERです。\n最大ポイントは%dPでした。", mux_point);
+            printf("所持ポイントが0P以下なのでGAME OVERです。\n最初の%dPから最大%dPまで増やしました。", start_point, mux_point);
             break;
         }else if(mux_point<point) {
             mux_point = point;

@@ -101,8 +101,9 @@ int main() {
     /* 【テスト用ターゲットパスワード】 */
     /* 最初は動きを見るために 3?4 文字で試すのがおすすめです */
     /* 例: 「k@4!」や「A5*」など */
-    const char* secret_password = "000000"; 
-
+    const char* secret_password ; 
+    printf("パスワードを入力してください：");
+    scanf("%s", secret_password);
     start_brute_force(secret_password);
 
     return 0;
