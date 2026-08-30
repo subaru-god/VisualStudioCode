@@ -7,14 +7,16 @@
 //gcc -finput-charset=cp932 -fexec-charset=cp932 main.c -o main && main.exe
 
 int make_random_num(void) {
-    int new_num = rand() %50 + 1;
+    int new_num = rand() %100 + 1;
     return (new_num);
 }
 
 int point_sys(int point, int sys) {
     if(sys == 0) {
         point = point * 1.5;
-    }else if(sys == 1){
+        if(point == 1 || point == 0) {
+            point = 2;
+        }
     }
     return point;
 }
@@ -27,7 +29,7 @@ int main(void){
     char Low[] = "Low";
 
     start:
-    printf("\nHigh&Lowゲームへようこそ！！\n\n最小の数が1   ||   最大の数が50です。\n\n");
+    printf("\nHigh&Lowゲームへようこそ！！\n\n最小の数が1   ||   最大の数が100です。\n\n");
     printf("ランダムに数字が表示されるので\n次の数字が今の数字より大きい(High)か小さい(Low)かを予想してね。\n\n");
     printf("まずは最初の所持ポイントを決めます\n\n");
     system("pause");
@@ -41,15 +43,19 @@ int main(void){
 
     while(1) {
 
+        printf("%d回目\n%dP\n\n", count, point);
         do {
-            printf("%d回目\n%dP\n\n%dよりも大きい(High)？小さい(Low)？：", count, point, new_num);
+            printf("%dよりも大きい(High)？小さい(Low)？：", new_num);
             scanf(" %4s", input);
-        } while(strcmp(input, High) != 0 && strcmp(input, Low) != 0); // input != High && input != Low　inputがHighでないかつinputがLowでないならもう一度
+/*        } while(strcmp(input, High) != 0 && strcmp(input, Low) != 0);
 
-        do {
+        do { */
             printf("何ポイント掛ける？(半角数字のみで)：");
-            scanf(" %d", &use);
-        } while(use>point || use <= 0);
+            if(scanf(" %d", &use) != 1) {
+                while (getchar() != '\n');
+                use = 0;
+            }
+        } while((strcmp(input, High) != 0 && strcmp(input, Low) != 0) || use > point || use <= 0);
 
         point -= use;
 
@@ -81,19 +87,24 @@ int main(void){
         }
         
         if(point <= 0) {
-            printf("所持ポイントが0P以下なのでGAME OVERです。\n最初の%dPから最大%dPまで増やしました。", start_point, mux_point);
+            printf("所持ポイントが0P以下なのでGAME OVERです。\n最初の%dPから最大%dPまで\n%dP増やしました。\n\n", start_point, mux_point, mux_point-start_point);
             break;
         }else if(mux_point<point) {
             mux_point = point;
         }
     }
 
-    do {
+/*    do {
         printf("もういちどやる？ y/n：");
         scanf(" %c", &input1);
-    }while(input1 != 'y' && input1 != 'n');
+    } while(input1 != 'y' && input1 != 'n');
     
     if(input1 == 'y') {
         goto start;
-    }else return 0;
+    }else {
+        return 0;
+    }
+    
+
+*/
 }
